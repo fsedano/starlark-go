@@ -49,6 +49,7 @@ const (
 	LTLT          // <<
 	GTGT          // >>
 	TILDE         // ~
+	AT            // @
 	DOT           // .
 	COMMA         // ,
 	EQ            // =
@@ -154,6 +155,7 @@ var tokenNames = [...]string{
 	LTLT:          "<<",
 	GTGT:          ">>",
 	TILDE:         "~",
+	AT:            "@",
 	DOT:           ".",
 	COMMA:         ",",
 	EQ:            "=",
@@ -834,7 +836,7 @@ start:
 		}
 		panic("unreachable")
 
-	case ':', ';', '~': // single-char tokens (except comma)
+	case ':', ';', '~', '@': // single-char tokens (except comma)
 		sc.readRune()
 		switch c {
 		case ':':
@@ -843,6 +845,8 @@ start:
 			return SEMI
 		case '~':
 			return TILDE
+		case '@':
+			return AT
 		}
 		panic("unreachable")
 

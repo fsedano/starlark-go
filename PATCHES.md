@@ -15,10 +15,12 @@ Track for review: design doc lives in the consumer repo at
 | File | Change | Status |
 |---|---|---|
 | `syntax/options.go` | Add `FileOptions.Classes bool` flag (gates the new syntax; zero-value = off, so stock behavior is unchanged). | DONE |
-| `syntax/scan.go` | Add `CLASS` token + `"class"` keyword; `@` decorator token if absent. | TODO |
-| `syntax/syntax.go` | Add minimal `ClassStmt` AST node (Name, Bases, Body, positions) + `Walk`/`String` cases. | TODO |
-| `syntax/parse.go` | `parseClassStmt` (mirror `parseDefStmt`, reuse `parseSuite`); decorator-prefix parsing; dispatch in the `parseStmt` switch. | TODO |
-| desugar (parse path) | At the end of `ParseOptions`: lower `ClassStmt` → builder-fn + `$make_class(...)`; `@dec def f` → `def f; f = dec(f)`. Every synthetic node copies a real source `Position` (line-number invariant). | TODO |
+| `syntax/scan.go` | `class` already scanned (reserved keyword); added `AT` (`@`) token for decorators. | DONE |
+| `syntax/syntax.go` | Added `ClassStmt` AST node + `DefStmt.Decorators`/`ClassStmt.Decorators` fields. | DONE |
+| `syntax/walk.go` | `Walk` cases for `ClassStmt` and decorator traversal. | DONE |
+| `syntax/parse.go` | `parseClassStmt` + `parseDecorated`; dispatch (gated on `Classes`) in `parseStmt`; class-body validation; desugar hook in `Parse`. | DONE |
+| `syntax/classes.go` | New file: the desugar pass — lowers `ClassStmt` → `$classN()` builder + `$make_class(...)`; `@dec def f` → `def f; f = dec(f)`. Every synthetic node copies a real source `Position` (line-number invariant). | DONE |
+| `syntax/classes_test.go` | New file: desugar-shape, decorators, member order, position invariant, flag-off stock behavior, class-body validation. | DONE |
 
 ## Invariants
 

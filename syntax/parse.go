@@ -55,6 +55,12 @@ func (opts *FileOptions) Parse(filename string, src any, mode Mode) (f *File, er
 		f.Path = filename
 	}
 	p.assignComments(f)
+	if f != nil && opts.Classes {
+		// Lower `class`/`@decorator` syntax into ordinary defs plus
+		// `$make_class` calls so that resolve/ and the compiler never
+		// observe the new nodes (fsedano fork). See classes.go.
+		desugarClasses(f)
+	}
 	return f, nil
 }
 
@@ -173,6 +179,10 @@ func (p *parser) parseFile() *File {
 func (p *parser) parseStmt(stmts []Stmt) []Stmt {
 	if p.tok == DEF {
 		return append(stmts, p.parseDefStmt())
+	} else if p.options.Classes && p.tok == CLASS {
+		return append(stmts, p.parseClassStmt(nil))
+	} else if p.options.Classes && p.tok == AT {
+		return append(stmts, p.parseDecorated())
 	} else if p.tok == IF {
 		return append(stmts, p.parseIfStmt())
 	} else if p.tok == FOR {
@@ -198,6 +208,98 @@ func (p *parser) parseDefStmt() Stmt {
 		Params: params,
 		Rparen: rparen,
 		Body:   body,
+	}
+}
+
+// parseClassStmt parses a class definition (fsedano fork):
+//
+//	class_stmt = 'class' ident ['(' [bases] ')'] ':' suite
+//	bases      = test (',' test)* ','?
+//
+// decorators is the optional list of @decorator expressions preceding the
+// 'class' keyword (nil when undecorated). Only enabled when
+// FileOptions.Classes is set; the resulting ClassStmt is lowered before
+// resolution (see classes.go).
+func (p *parser) parseClassStmt(decorators []Expr) Stmt {
+	classpos := p.nextToken() // consume CLASS
+	id := p.parseIdent()
+	var lparen, rparen Position
+	var bases []Expr
+	if p.tok == LPAREN {
+		lparen = p.consume(LPAREN)
+		for p.tok != RPAREN {
+			bases = append(bases, p.parseTest())
+			if p.tok != COMMA {
+				break
+			}
+			p.nextToken() // consume COMMA
+		}
+		rparen = p.consume(RPAREN)
+	}
+	p.consume(COLON)
+	body := p.parseSuite()
+	// Restrict the body to constructs the desugarer can statically enumerate
+	// into a class namespace: methods, simple class-var assignments, nested
+	// classes, `pass`, and bare expressions (e.g. a docstring).
+	for _, s := range body {
+		switch s := s.(type) {
+		case *DefStmt, *ClassStmt:
+			// method or nested class
+		case *AssignStmt:
+			if s.Op != EQ {
+				p.in.errorf(Start(s), "class body allows only simple assignments, not augmented assignment")
+			}
+			if _, ok := s.LHS.(*Ident); !ok {
+				p.in.errorf(Start(s), "class variable must be a single name")
+			}
+		case *BranchStmt:
+			if s.Token != PASS {
+				p.in.errorf(s.TokenPos, "unexpected %#v in class body", s.Token)
+			}
+		case *ExprStmt:
+			// docstring or bare expression
+		default:
+			p.in.errorf(Start(s), "unsupported statement in class body; only methods, class variables, and nested classes are allowed")
+		}
+	}
+	return &ClassStmt{
+		Class:      classpos,
+		Name:       id,
+		Lparen:     lparen,
+		Bases:      bases,
+		Rparen:     rparen,
+		Body:       body,
+		Decorators: decorators,
+	}
+}
+
+// parseDecorated parses one or more @decorator lines followed by a def or
+// class definition (fsedano fork):
+//
+//	decorated = ('@' test NEWLINE)+ (def_stmt | class_stmt)
+//
+// Decorators are attached to the returned DefStmt/ClassStmt and lowered to
+// `name = dec(name)` assignments before resolution.
+func (p *parser) parseDecorated() Stmt {
+	var decorators []Expr
+	for p.tok == AT {
+		p.nextToken() // consume '@'
+		decorators = append(decorators, p.parseTest())
+		if p.tok != NEWLINE {
+			p.in.errorf(p.in.pos, "expected newline after decorator")
+		}
+		p.nextToken() // consume NEWLINE
+	}
+	switch p.tok {
+	case DEF:
+		def := p.parseDefStmt().(*DefStmt)
+		def.Decorators = decorators
+		return def
+	case CLASS:
+		return p.parseClassStmt(decorators)
+	default:
+		p.in.errorf(p.in.pos, "expected 'def' or 'class' after decorator, got %#v", p.tok)
+		panic("unreachable")
 	}
 }
 
