@@ -70,6 +70,15 @@ func init() {
 		"tuple":     NewBuiltin("tuple", tuple),
 		"type":      NewBuiltin("type", type_),
 		"zip":       NewBuiltin("zip", zip),
+
+		// Python-style class support (fsedano fork). $make_class is synthetic
+		// (emitted by the syntax desugarer; unspellable in user code); the rest
+		// are user-facing. See class.go / classbuiltins.go.
+		"$make_class":  NewBuiltin("$make_class", makeClass),
+		"super":        NewBuiltin("super", super),
+		"isinstance":   NewBuiltin("isinstance", isinstance),
+		"staticmethod": NewBuiltin("staticmethod", staticmethod),
+		"classmethod":  NewBuiltin("classmethod", classmethod),
 	}
 }
 
