@@ -30,6 +30,9 @@ type FileOptions struct {
 
 	// compiler
 	Recursion bool // disable recursion check for functions in this file
+
+	// parser (fsedano fork)
+	Classes bool // allow Python-style `class` definitions and `@decorator` syntax
 }
 
 // TODO(adonovan): provide a canonical flag parser for FileOptions.

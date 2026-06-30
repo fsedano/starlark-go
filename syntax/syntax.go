@@ -91,6 +91,7 @@ type Stmt interface {
 
 func (*AssignStmt) stmt() {}
 func (*BranchStmt) stmt() {}
+func (*ClassStmt) stmt()  {}
 func (*DefStmt) stmt()    {}
 func (*ExprStmt) stmt()   {}
 func (*ForStmt) stmt()    {}
@@ -121,12 +122,13 @@ func (x *AssignStmt) Span() (start, end Position) {
 // A DefStmt represents a function definition.
 type DefStmt struct {
 	commentsRef
-	Def    Position
-	Name   *Ident
-	Lparen Position
-	Params []Expr // param = ident | ident=expr | * | *ident | **ident
-	Rparen Position
-	Body   []Stmt
+	Def        Position
+	Name       *Ident
+	Lparen     Position
+	Params     []Expr // param = ident | ident=expr | * | *ident | **ident
+	Rparen     Position
+	Body       []Stmt
+	Decorators []Expr // optional @decorator expressions (fsedano fork); applied outermost-first. Lowered away before resolve.
 
 	Function any // a *resolve.Function, set by resolver
 }
@@ -134,6 +136,40 @@ type DefStmt struct {
 func (x *DefStmt) Span() (start, end Position) {
 	_, end = x.Body[len(x.Body)-1].Span()
 	return x.Def, end
+}
+
+// A ClassStmt represents a Python-style class definition (fsedano fork):
+//
+//	class Name(Base1, Base2):
+//	    <body>
+//
+// The body may contain method definitions (DefStmt, possibly decorated) and
+// simple class-variable assignments (AssignStmt with a single Ident LHS).
+// A ClassStmt is produced only when FileOptions.Classes is set, and it is
+// lowered ("desugared") into ordinary defs plus a call to the predeclared
+// `$make_class` builtin before name resolution runs, so resolve/ and the
+// compiler never observe it. See classes.go.
+type ClassStmt struct {
+	commentsRef
+	Class      Position
+	Name       *Ident
+	Lparen     Position // optional; invalid if there is no base list
+	Bases      []Expr   // base-class expressions (positional only)
+	Rparen     Position
+	Body       []Stmt
+	Decorators []Expr // optional @decorator expressions, applied outermost-first
+}
+
+// Span (like the Walk case for ClassStmt) is reachable only by callers that
+// drive the parser internals; the public FileOptions.Parse desugars every
+// ClassStmt away before returning, so a returned tree never contains one.
+func (x *ClassStmt) Span() (start, end Position) {
+	if len(x.Body) > 0 {
+		_, end = x.Body[len(x.Body)-1].Span()
+	} else {
+		end = x.Class.add("class")
+	}
+	return x.Class, end
 }
 
 // An ExprStmt is an expression evaluated for side effects.

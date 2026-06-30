@@ -38,9 +38,22 @@ func Walk(n Node, f func(Node) bool) {
 		Walk(n.RHS, f)
 
 	case *DefStmt:
+		for _, dec := range n.Decorators {
+			Walk(dec, f)
+		}
 		Walk(n.Name, f)
 		for _, param := range n.Params {
 			Walk(param, f)
+		}
+		walkStmts(n.Body, f)
+
+	case *ClassStmt:
+		for _, dec := range n.Decorators {
+			Walk(dec, f)
+		}
+		Walk(n.Name, f)
+		for _, base := range n.Bases {
+			Walk(base, f)
 		}
 		walkStmts(n.Body, f)
 
