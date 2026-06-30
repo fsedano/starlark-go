@@ -40,10 +40,10 @@ var (
 )
 
 // Name returns the class name (also its Callable name).
-func (c *Class) Name() string  { return c.name }
+func (c *Class) Name() string   { return c.name }
 func (c *Class) String() string { return fmt.Sprintf("<class %q>", c.name) }
-func (c *Class) Type() string  { return "class" }
-func (c *Class) Truth() Bool   { return True }
+func (c *Class) Type() string   { return "class" }
+func (c *Class) Truth() Bool    { return True }
 
 func (c *Class) Freeze() {
 	if !c.frozen {
@@ -342,12 +342,12 @@ var (
 
 func (m *staticMethod) String() string        { return "<staticmethod>" }
 func (m *staticMethod) Type() string          { return "staticmethod" }
-func (m *staticMethod) Truth() Bool            { return True }
-func (m *staticMethod) Freeze()                { m.fn.Freeze() }
-func (m *staticMethod) Hash() (uint32, error)  { return 0, fmt.Errorf("unhashable type: staticmethod") }
+func (m *staticMethod) Truth() Bool           { return True }
+func (m *staticMethod) Freeze()               { m.fn.Freeze() }
+func (m *staticMethod) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: staticmethod") }
 
-func (m *classMethod) String() string       { return "<classmethod>" }
-func (m *classMethod) Type() string         { return "classmethod" }
+func (m *classMethod) String() string        { return "<classmethod>" }
+func (m *classMethod) Type() string          { return "classmethod" }
 func (m *classMethod) Truth() Bool           { return True }
 func (m *classMethod) Freeze()               { m.fn.Freeze() }
 func (m *classMethod) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: classmethod") }

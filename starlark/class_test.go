@@ -165,6 +165,18 @@ c.div(5)
 	}
 }
 
+func TestDuplicateBase(t *testing.T) {
+	_, err := execClasses(t, `
+class A:
+    pass
+class B(A, A):
+    pass
+`)
+	if err == nil || !strings.Contains(err.Error(), "duplicate base class") {
+		t.Fatalf("err = %v, want a duplicate-base-class error", err)
+	}
+}
+
 func TestUnhashableInstance(t *testing.T) {
 	_, err := execClasses(t, `
 class C:

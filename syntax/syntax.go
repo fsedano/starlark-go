@@ -160,6 +160,9 @@ type ClassStmt struct {
 	Decorators []Expr // optional @decorator expressions, applied outermost-first
 }
 
+// Span (like the Walk case for ClassStmt) is reachable only by callers that
+// drive the parser internals; the public FileOptions.Parse desugars every
+// ClassStmt away before returning, so a returned tree never contains one.
 func (x *ClassStmt) Span() (start, end Position) {
 	if len(x.Body) > 0 {
 		_, end = x.Body[len(x.Body)-1].Span()

@@ -40,6 +40,13 @@ func makeClass(thread *Thread, b *Builtin, args Tuple, kwargs []Tuple) (Value, e
 		if !ok {
 			return nil, fmt.Errorf("base of class %s must be a class, got %s", name, bv.Type())
 		}
+		// Reject repeats up front; C3 would otherwise fail with an opaque
+		// "inconsistent hierarchy".
+		for _, prev := range bases {
+			if prev == bc {
+				return nil, fmt.Errorf("class %s: duplicate base class %s", name, bc.name)
+			}
+		}
 		bases = append(bases, bc)
 	}
 
