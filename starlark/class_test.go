@@ -175,3 +175,42 @@ d = {C(): 1}
 		t.Fatalf("err = %v, want an unhashable-instance error", err)
 	}
 }
+
+func TestZeroArgSuper(t *testing.T) {
+	g, err := execClasses(t, `
+class A:
+    def __init__(self, x):
+        self.x = x
+    def who(self):
+        return "A"
+
+class B(A):
+    def __init__(self, x):
+        super().__init__(x + 1)
+    def who(self):
+        return "B>" + super().who()
+
+class C(B):
+    def who(self):
+        return "C>" + super().who()
+
+c = C(10)
+chain = c.who()
+xval = c.x
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nested zero-arg super() must walk C->B->A via the per-call context stack.
+	wantStr(t, g, "chain", "C>B>A")
+	if g["xval"] != starlark.MakeInt(11) {
+		t.Errorf("c.x = %v, want 11 (super().__init__ chain)", g["xval"])
+	}
+}
+
+func TestZeroArgSuperOutsideMethod(t *testing.T) {
+	_, err := execClasses(t, "x = super()\n")
+	if err == nil || !strings.Contains(err.Error(), "no enclosing method") {
+		t.Fatalf("err = %v, want 'no enclosing method' error", err)
+	}
+}

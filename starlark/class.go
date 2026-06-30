@@ -58,39 +58,34 @@ func (c *Class) Freeze() {
 // distinct classes that share a name may collide, which is permitted.
 func (c *Class) Hash() (uint32, error) { return String(c.name).Hash() }
 
-// lookup returns the raw member named by name, searching the MRO, or nil.
-func (c *Class) lookup(name string) Value {
+// lookup returns the named member and the class that defines it, searching the
+// MRO. The defining class seeds zero-arg super() and bound-method dispatch.
+func (c *Class) lookup(name string) (Value, *Class) {
 	for _, k := range c.mro {
 		if v, ok := k.members[name]; ok {
-			return v
+			return v, k
 		}
 	}
-	return nil
+	return nil, nil
 }
 
-// Attr implements attribute access on the class itself (e.g. Dog.family,
-// Dog.kind). Plain methods are returned unbound; @classmethod binds to the
-// class; @staticmethod yields the raw function; class variables are returned
-// as-is.
 func (c *Class) Attr(name string) (Value, error) {
-	if raw := c.lookup(name); raw != nil {
-		return bindMember(raw, nil, c)
+	if raw, dc := c.lookup(name); raw != nil {
+		return bindMember(raw, nil, c, dc)
 	}
 	return nil, nil
 }
 
 func (c *Class) AttrNames() []string { return memberNames(c, nil) }
 
-// CallInternal constructs an instance: allocate, then run __init__ (found via
-// the MRO) bound to the new instance.
 func (c *Class) CallInternal(thread *Thread, args Tuple, kwargs []Tuple) (Value, error) {
 	inst := &Instance{class: c, fields: make(map[string]Value)}
-	if init := c.lookup("__init__"); init != nil {
+	if init, dc := c.lookup("__init__"); init != nil {
 		fn, ok := init.(Callable)
 		if !ok {
 			return nil, fmt.Errorf("%s.__init__ is not callable (%s)", c.name, init.Type())
 		}
-		if _, err := Call(thread, &boundMethod{recv: inst, fn: fn, cls: c.name}, args, kwargs); err != nil {
+		if _, err := Call(thread, &boundMethod{recv: inst, fn: fn, cls: c.name, defining: dc}, args, kwargs); err != nil {
 			return nil, err
 		}
 	} else if len(args) > 0 || len(kwargs) > 0 {
@@ -134,14 +129,12 @@ func (i *Instance) Hash() (uint32, error) {
 	return 0, fmt.Errorf("unhashable type: %s", i.class.name)
 }
 
-// Attr resolves attribute reads: instance fields first, then methods and class
-// variables via the MRO (methods bound to this instance).
 func (i *Instance) Attr(name string) (Value, error) {
 	if v, ok := i.fields[name]; ok {
 		return v, nil
 	}
-	if raw := i.class.lookup(name); raw != nil {
-		return bindMember(raw, i, i.class)
+	if raw, dc := i.class.lookup(name); raw != nil {
+		return bindMember(raw, i, i.class, dc)
 	}
 	return nil, nil
 }
@@ -157,10 +150,9 @@ func (i *Instance) SetField(name string, v Value) error {
 	return nil
 }
 
-// bindMember adapts a raw class member for access. inst is the receiver
-// instance (nil for access through the class); cls is the class to bind a
-// @classmethod to.
-func bindMember(raw Value, inst *Instance, cls *Class) (Value, error) {
+// bindMember adapts a raw member: inst is the receiver (nil through the class),
+// recvClass binds @classmethod, defining seeds zero-arg super().
+func bindMember(raw Value, inst *Instance, recvClass, defining *Class) (Value, error) {
 	switch m := raw.(type) {
 	case *staticMethod:
 		return m.fn, nil
@@ -169,14 +161,14 @@ func bindMember(raw Value, inst *Instance, cls *Class) (Value, error) {
 		if !ok {
 			return nil, fmt.Errorf("classmethod wraps a non-callable %s", m.fn.Type())
 		}
-		return &boundMethod{recv: cls, fn: fn, cls: cls.name}, nil
+		return &boundMethod{recv: recvClass, fn: fn, cls: recvClass.name, defining: defining}, nil
 	case Callable:
 		if inst != nil {
-			return &boundMethod{recv: inst, fn: m, cls: cls.name}, nil
+			return &boundMethod{recv: inst, fn: m, cls: recvClass.name, defining: defining}, nil
 		}
-		return m, nil // accessed through the class: unbound function
+		return m, nil
 	default:
-		return raw, nil // class variable or other plain value
+		return raw, nil
 	}
 }
 
@@ -202,13 +194,13 @@ func memberNames(c *Class, inst *Instance) []string {
 	return names
 }
 
-// A boundMethod pairs a receiver (instance or class) with a function, supplying
-// the receiver as the first argument on call. It delegates through Call so the
-// underlying function gets its own VM frame and thus accurate tracebacks.
+// boundMethod delegates through Call so the function gets its own VM frame,
+// keeping tracebacks pointed at the real method source line.
 type boundMethod struct {
-	recv Value
-	fn   Callable
-	cls  string // owning class name, for a readable Name()
+	recv     Value
+	fn       Callable
+	cls      string
+	defining *Class // resolves zero-arg super() to the method's owning class
 }
 
 var (
@@ -237,10 +229,45 @@ func (b *boundMethod) Position() syntax.Position {
 }
 
 func (b *boundMethod) CallInternal(thread *Thread, args Tuple, kwargs []Tuple) (Value, error) {
+	if b.defining != nil {
+		pushSuperContext(thread, b.defining, b.recv)
+		defer popSuperContext(thread)
+	}
 	all := make(Tuple, 0, len(args)+1)
 	all = append(all, b.recv)
 	all = append(all, args...)
 	return Call(thread, b.fn, all, kwargs)
+}
+
+// superContext records the executing method's owning class and receiver so a
+// zero-arg super() resolves like super(class, recv). A per-thread stack keeps
+// it correct across nested method calls.
+type superContext struct {
+	class *Class
+	recv  Value
+}
+
+const superContextKey = "starlark.class.super"
+
+func pushSuperContext(thread *Thread, class *Class, recv Value) {
+	stack, _ := thread.Local(superContextKey).([]superContext)
+	thread.SetLocal(superContextKey, append(stack, superContext{class, recv}))
+}
+
+func popSuperContext(thread *Thread) {
+	stack, _ := thread.Local(superContextKey).([]superContext)
+	if n := len(stack); n > 0 {
+		thread.SetLocal(superContextKey, stack[:n-1])
+	}
+}
+
+func currentSuperContext(thread *Thread) (*Class, Value, bool) {
+	stack, _ := thread.Local(superContextKey).([]superContext)
+	if len(stack) == 0 {
+		return nil, nil, false
+	}
+	top := stack[len(stack)-1]
+	return top.class, top.recv, true
 }
 
 // A superProxy implements super(Cls, obj): attribute lookups resolve in the
@@ -274,7 +301,7 @@ func (s *superProxy) Attr(name string) (Value, error) {
 	}
 	for _, k := range mro[i+1:] {
 		if raw, ok := k.members[name]; ok {
-			return bindMember(raw, s.inst, s.objClass)
+			return bindMember(raw, s.inst, s.objClass, k)
 		}
 	}
 	return nil, nil

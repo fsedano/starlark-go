@@ -61,33 +61,41 @@ func makeClass(thread *Thread, b *Builtin, args Tuple, kwargs []Tuple) (Value, e
 	return c, nil
 }
 
-// super implements super(Cls, obj): method lookups resolve in obj's MRO
-// starting just after Cls. (Explicit two-argument form; the zero-argument
-// Python 3 form is a possible future addition.)
+// super implements super(Cls, obj) and the zero-argument super(): method
+// lookups resolve in obj's MRO starting just after the defining class.
 func super(thread *Thread, b *Builtin, args Tuple, kwargs []Tuple) (Value, error) {
-	var clsV, objV Value
-	if err := UnpackPositionalArgs("super", args, kwargs, 2, &clsV, &objV); err != nil {
-		return nil, err
+	if len(kwargs) != 0 {
+		return nil, fmt.Errorf("super: unexpected keyword arguments")
 	}
-	cls, ok := clsV.(*Class)
+	switch len(args) {
+	case 0:
+		class, recv, ok := currentSuperContext(thread)
+		if !ok {
+			return nil, fmt.Errorf("super(): no enclosing method")
+		}
+		return newSuper(class, recv)
+	case 2:
+		cls, ok := args[0].(*Class)
+		if !ok {
+			return nil, fmt.Errorf("super: first argument must be a class, got %s", args[0].Type())
+		}
+		return newSuper(cls, args[1])
+	default:
+		return nil, fmt.Errorf("super() takes 0 or 2 arguments (%d given)", len(args))
+	}
+}
+
+func newSuper(cls *Class, obj Value) (Value, error) {
+	inst, ok := obj.(*Instance)
 	if !ok {
-		return nil, fmt.Errorf("super: first argument must be a class, got %s", clsV.Type())
+		return nil, fmt.Errorf("super: object must be a class instance, got %s", obj.Type())
 	}
-	inst, ok := objV.(*Instance)
-	if !ok {
-		return nil, fmt.Errorf("super: second argument must be an instance, got %s", objV.Type())
-	}
-	found := false
 	for _, k := range inst.class.mro {
 		if k == cls {
-			found = true
-			break
+			return &superProxy{start: cls, inst: inst, objClass: inst.class}, nil
 		}
 	}
-	if !found {
-		return nil, fmt.Errorf("super(%s, obj): %s is not in the MRO of %s", cls.name, cls.name, inst.class.name)
-	}
-	return &superProxy{start: cls, inst: inst, objClass: inst.class}, nil
+	return nil, fmt.Errorf("super(%s, obj): %s is not in the MRO of %s", cls.name, cls.name, inst.class.name)
 }
 
 // isinstance reports whether obj is an instance of class (or of any class in a
